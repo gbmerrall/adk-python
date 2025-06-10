@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from typing import Any
 from typing import Dict
@@ -26,6 +27,7 @@ from google.genai import types
 from typing_extensions import override
 
 from google import genai
+from google.genai.errors import ClientError
 
 from . import _session_util
 from ..events.event import Event
@@ -34,6 +36,7 @@ from .base_session_service import BaseSessionService
 from .base_session_service import GetSessionConfig
 from .base_session_service import ListSessionsResponse
 from .session import Session
+
 
 isoparse = parser.isoparse
 logger = logging.getLogger('google_adk.' + __name__)
@@ -82,8 +85,40 @@ class VertexAiSessionService(BaseSessionService):
     session_id = api_response['name'].split('/')[-3]
     operation_id = api_response['name'].split('/')[-1]
 
+    # Check if Vertex AI and API key are both enabled, meaning the user is
+    # using the Vertex Express Mode.
     max_retry_attempt = 5
     lro_response = None
+    if os.environ.get('GOOGLE_GENAI_USE_VERTEXAI', '0').lower() in [
+        'true',
+        '1',
+    ] and os.environ.get('GOOGLE_API_KEY', None):
+      while max_retry_attempt >= 0:
+        try:
+          get_session_api_response = await api_client.async_request(
+              http_method='GET',
+              path=(
+                  f'reasoningEngines/{reasoning_engine_id}/sessions/{session_id}'
+              ),
+              request_dict={},
+          )
+        except ClientError as e:
+          logger.info('Polling for session %s: %s', session_id, e)
+          await asyncio.sleep(1)
+          max_retry_attempt -= 1
+          continue
+        update_timestamp = isoparse(
+            get_session_api_response['updateTime']
+        ).timestamp()
+        return Session(
+            app_name=str(app_name),
+            user_id=str(user_id),
+            id=str(session_id),
+            state=get_session_api_response.get('sessionState', {}),
+            last_update_time=update_timestamp,
+        )
+      raise TimeoutError('Session creation failed.')
+
     while max_retry_attempt >= 0:
       lro_response = await api_client.async_request(
           http_method='GET',
@@ -270,6 +305,9 @@ def _get_api_client(project: str, location: str):
   management.
   """
   client = genai.Client(vertexai=True, project=project, location=location)
+  client._api_client._http_options.base_url = (
+      'https://staging-aiplatform.sandbox.googleapis.com'
+  )
   return client._api_client
 
 
