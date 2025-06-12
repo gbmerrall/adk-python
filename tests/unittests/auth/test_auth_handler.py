@@ -444,19 +444,6 @@ class TestParseAndStoreAuthResponse:
 class TestExchangeAuthToken:
   """Tests for the exchange_auth_token method."""
 
-  def test_token_exchange_not_supported(
-      self, auth_config_with_auth_code, monkeypatch
-  ):
-    """Test when token exchange is not supported."""
-    monkeypatch.setattr(
-        "google.adk.auth.auth_handler.SUPPORT_TOKEN_EXCHANGE", False
-    )
-
-    handler = AuthHandler(auth_config_with_auth_code)
-    result = handler.exchange_auth_token()
-
-    assert result == auth_config_with_auth_code.exchanged_auth_credential
-
   def test_openid_missing_token_endpoint(
       self, openid_auth_scheme, oauth2_credentials_with_auth_code
   ):
@@ -537,7 +524,10 @@ class TestExchangeAuthToken:
 
     assert result == oauth2_credentials_with_token
 
-  @patch("google.adk.auth.auth_handler.OAuth2Session", MockOAuth2Session)
+  @patch(
+      "google.adk.auth.oauth2_credential_fetcher.OAuth2Session",
+      MockOAuth2Session,
+  )
   def test_successful_token_exchange(self, auth_config_with_auth_code):
     """Test a successful token exchange."""
     handler = AuthHandler(auth_config_with_auth_code)
